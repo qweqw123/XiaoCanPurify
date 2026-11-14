@@ -22,8 +22,14 @@ jobs:
       - name: Install Gradle via apt
         run: sudo apt-get update && sudo apt-get install -y gradle
 
+      - name: Generate Gradle Wrapper
+        run: gradle wrapper
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
       - name: Build Debug APK for app module
-        run: gradle :app:assembleDebug
+        run: ./gradlew :app:assembleDebug
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
