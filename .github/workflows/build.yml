@@ -22,9 +22,9 @@ jobs:
       - name: Install Gradle via apt
         run: sudo apt-get update && sudo apt-get install -y gradle
 
-      # 关键：指定使用 Gradle 8.5 版本生成 Wrapper，完美支持 Java 17 和现代 Android SDK
+      # 关键：将 Gradle 版本升级到 AGP 要求的 9.4.1
       - name: Generate Modern Gradle Wrapper
-        run: gradle wrapper --gradle-version 8.5
+        run: gradle wrapper --gradle-version 9.4.1
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
