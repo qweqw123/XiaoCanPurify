@@ -25,10 +25,12 @@ public final class MainHook extends XposedModule {
     public static final boolean ENABLE_POPUP_BLOCKER = false;         
     public static final boolean ENABLE_BOTTOM_BAR_PURIFIER = false;   
     public static final boolean ENABLE_HOME_PAGE_PURIFIER = false;    
-    public static final boolean ENABLE_ORDER_PAGE_PURIFIER = false;   
-    public static final boolean ENABLE_USER_PAGE_PURIFIER = false;    
-    public static final boolean ENABLE_NETWORK_INTERCEPTOR = false;  
-    public static final boolean ENABLE_FLUTTER_GUARD = false;
+    public static final boolean ENABLE_ORDER_PAGE_PURIFIER = false;
+    public static final boolean ENABLE_DETAIL_PAGE_PURIFIER = false;  // <--- 补上这一行！详情页净化
+    public static final boolean ENABLE_USER_PAGE_PURIFIER = false;    // 「我的」页面净化
+    
+    public static final boolean ENABLE_NETWORK_INTERCEPTOR = false;  // OkHttp 网络层广告拦截
+    public static final boolean ENABLE_FLUTTER_GUARD = false;        // Flutter 插件广告通道拦截
     // ==========================================================
 
     @Override
