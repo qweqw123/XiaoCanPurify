@@ -21,17 +21,14 @@ public final class MainHook extends XposedModule {
 
     // ==================== 功能模块独立开关 ====================
     // 如果启用后仍闪退，可将开关改为 false 进行二分法排查
-    public static final boolean ENABLE_AD_BLOCKER = true;            // 开屏/全屏/信息流广告过滤
-    public static final boolean ENABLE_POPUP_BLOCKER = true;         // 各类营销/更新/红包弹窗拦截
-    public static final boolean ENABLE_BOTTOM_BAR_PURIFIER = true;   // 精简底部导航栏（保留首页/订单/我）
-    public static final boolean ENABLE_HOME_PAGE_PURIFIER = true;    // 首页浮窗与横幅净化
-    public static final boolean ENABLE_ORDER_PAGE_PURIFIER = true;   // 订单页净化
-    public static final boolean ENABLE_DETAIL_PAGE_PURIFIER = true;  // 详情页净化
-    public static final boolean ENABLE_USER_PAGE_PURIFIER = true;    // 「我的」页面净化
-    
-    // 以下两项涉及底层网络拦截和 Flutter 引擎，在 Vector 虚拟容器中极易触发加固检测闪退，默认先关闭
-    public static final boolean ENABLE_NETWORK_INTERCEPTOR = false;  // OkHttp 网络层广告拦截
-    public static final boolean ENABLE_FLUTTER_GUARD = false;        // Flutter 插件广告通道拦截
+    public static final boolean ENABLE_AD_BLOCKER = false;            
+    public static final boolean ENABLE_POPUP_BLOCKER = false;         
+    public static final boolean ENABLE_BOTTOM_BAR_PURIFIER = false;   
+    public static final boolean ENABLE_HOME_PAGE_PURIFIER = false;    
+    public static final boolean ENABLE_ORDER_PAGE_PURIFIER = false;   
+    public static final boolean ENABLE_USER_PAGE_PURIFIER = false;    
+    public static final boolean ENABLE_NETWORK_INTERCEPTOR = false;  
+    public static final boolean ENABLE_FLUTTER_GUARD = false;
     // ==========================================================
 
     @Override
