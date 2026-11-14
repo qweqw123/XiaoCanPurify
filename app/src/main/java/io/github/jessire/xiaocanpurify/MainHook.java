@@ -2,7 +2,7 @@ package io.github.jessire.xiaocanpurify;
 
 import android.app.Activity;
 import android.app.Application;
-import android.content.Context;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 
@@ -19,10 +19,25 @@ public final class MainHook extends XposedModule {
     private static final AtomicBoolean HOOKED = new AtomicBoolean(false);
     private static volatile MainHook instance;
 
+    // ==================== 功能模块独立开关 ====================
+    // 如果启用后仍闪退，可将开关改为 false 进行二分法排查
+    public static final boolean ENABLE_AD_BLOCKER = true;            // 开屏/全屏/信息流广告过滤
+    public static final boolean ENABLE_POPUP_BLOCKER = true;         // 各类营销/更新/红包弹窗拦截
+    public static final boolean ENABLE_BOTTOM_BAR_PURIFIER = true;   // 精简底部导航栏（保留首页/订单/我）
+    public static final boolean ENABLE_HOME_PAGE_PURIFIER = true;    // 首页浮窗与横幅净化
+    public static final boolean ENABLE_ORDER_PAGE_PURIFIER = true;   // 订单页净化
+    public static final boolean ENABLE_DETAIL_PAGE_PURIFIER = true;  // 详情页净化
+    public static final boolean ENABLE_USER_PAGE_PURIFIER = true;    // 「我的」页面净化
+    
+    // 以下两项涉及底层网络拦截和 Flutter 引擎，在 Vector 虚拟容器中极易触发加固检测闪退，默认先关闭
+    public static final boolean ENABLE_NETWORK_INTERCEPTOR = false;  // OkHttp 网络层广告拦截
+    public static final boolean ENABLE_FLUTTER_GUARD = false;        // Flutter 插件广告通道拦截
+    // ==========================================================
+
     @Override
     public void onModuleLoaded(XposedModuleInterface.ModuleLoadedParam param) {
         instance = this;
-        log("XiaoCanPurify API 102 module loaded.");
+        log("XiaoCanPurify API 102 (Vector-Safe) module loaded.");
     }
 
     @Override
@@ -30,17 +45,21 @@ public final class MainHook extends XposedModule {
         if (!TARGET_PACKAGE.equals(param.getPackageName())) {
             return;
         }
-        instance = this;
-        log("Target package ready: " + param.getPackageName());
 
-        ClassLoader initialLoader = param.getClassLoader();
-        if (canLoadTargetClasses(initialLoader)) {
-            installAll(this, initialLoader);
-            return;
+        // 1. 过滤所有后台/推送子进程，仅在主进程执行，防止 Vector 多进程容器崩溃
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            String processName = Application.getProcessName();
+            if (processName != null && !TARGET_PACKAGE.equals(processName)) {
+                log("Skip sub-process in Vector: " + processName);
+                return;
+            }
         }
 
-        // App uses ShellApplication / Aliyun Jiagu unpacker, hook Application & Activity lifecycle
-        hookLifecycle(this);
+        instance = this;
+        log("Target main process ready: " + param.getPackageName());
+
+        // 2. 避开 onPackageReady 抢跑与 Aliyun Jiagu 解壳阶段，延迟到 Activity 阶段再挂载
+        hookActivitySafe(this);
     }
 
     private static boolean canLoadTargetClasses(ClassLoader cl) {
@@ -48,60 +67,30 @@ public final class MainHook extends XposedModule {
         try {
             Class.forName("com.realtech.xiaocan.MainActivity", false, cl);
             return true;
-        } catch (ClassNotFoundException e) {
+        } catch (Throwable e) {
             return false;
         }
     }
 
-    private void hookLifecycle(XposedInterface xposed) {
+    private void hookActivitySafe(XposedInterface xposed) {
         try {
-            Method attachBaseContext = Application.class.getDeclaredMethod("attachBaseContext", Context.class);
-            xposed.hook(attachBaseContext).intercept(chain -> {
-                Object result = chain.proceed();
-                Context context = (Context) chain.getArg(0);
-                if (context != null) {
-                    ClassLoader cl = context.getClassLoader();
-                    if (canLoadTargetClasses(cl)) {
-                        installAll(xposed, cl);
-                    }
-                }
-                return result;
-            });
-        } catch (Throwable t) {
-            log("Hook Application.attachBaseContext failed: " + t);
-        }
-
-        try {
-            Method onCreate = Application.class.getDeclaredMethod("onCreate");
-            xposed.hook(onCreate).intercept(chain -> {
-                Object result = chain.proceed();
-                Application app = (Application) chain.getThisObject();
-                if (app != null) {
-                    ClassLoader cl = app.getClassLoader();
-                    if (canLoadTargetClasses(cl)) {
-                        installAll(xposed, cl);
-                    }
-                }
-                return result;
-            });
-        } catch (Throwable t) {
-            log("Hook Application.onCreate failed: " + t);
-        }
-
-        try {
+            // 仅挂载 Activity.onCreate，避开 Vector 对 Application 生命周期的底层代理冲突
             Method actOnCreate = Activity.class.getDeclaredMethod("onCreate", Bundle.class);
             xposed.hook(actOnCreate).intercept(chain -> {
-                Activity activity = (Activity) chain.getThisObject();
-                if (activity != null) {
-                    ClassLoader cl = activity.getClassLoader();
-                    if (canLoadTargetClasses(cl)) {
-                        installAll(xposed, cl);
+                if (!HOOKED.get()) {
+                    Activity activity = (Activity) chain.getThisObject();
+                    if (activity != null) {
+                        ClassLoader cl = activity.getClassLoader();
+                        if (canLoadTargetClasses(cl)) {
+                            installAll(xposed, cl);
+                        }
                     }
                 }
                 return chain.proceed();
             });
+            log("Activity.onCreate lifecycle hook registered.");
         } catch (Throwable t) {
-            log("Hook Activity.onCreate failed: " + t);
+            log("Hook Activity.onCreate failed: " + Log.getStackTraceString(t));
         }
     }
 
@@ -109,73 +98,90 @@ public final class MainHook extends XposedModule {
         if (!HOOKED.compareAndSet(false, true)) {
             return;
         }
-        log("Target classes available, installing purifier hooks with ClassLoader: " + classLoader);
+        log("Target classes unlocked, installing purifier hooks with ClassLoader: " + classLoader);
 
-        try {
-            AdBlocker.install(xposed, classLoader);
-            log("AdBlocker installed successfully.");
-        } catch (Throwable t) {
-            log("AdBlocker install error: " + t);
+        if (ENABLE_AD_BLOCKER) {
+            try {
+                AdBlocker.install(xposed, classLoader);
+                log("AdBlocker installed.");
+            } catch (Throwable t) {
+                log("AdBlocker error: " + Log.getStackTraceString(t));
+            }
         }
 
-        try {
-            PopupBlocker.install(xposed, classLoader);
-            log("PopupBlocker installed successfully.");
-        } catch (Throwable t) {
-            log("PopupBlocker install error: " + t);
+        if (ENABLE_POPUP_BLOCKER) {
+            try {
+                PopupBlocker.install(xposed, classLoader);
+                log("PopupBlocker installed.");
+            } catch (Throwable t) {
+                log("PopupBlocker error: " + Log.getStackTraceString(t));
+            }
         }
 
-        try {
-            BottomBarPurifier.install(xposed, classLoader);
-            log("BottomBarPurifier installed successfully.");
-        } catch (Throwable t) {
-            log("BottomBarPurifier install error: " + t);
+        if (ENABLE_BOTTOM_BAR_PURIFIER) {
+            try {
+                BottomBarPurifier.install(xposed, classLoader);
+                log("BottomBarPurifier installed.");
+            } catch (Throwable t) {
+                log("BottomBarPurifier error: " + Log.getStackTraceString(t));
+            }
         }
 
-        try {
-            HomePagePurifier.install(xposed, classLoader);
-            log("HomePagePurifier installed successfully.");
-        } catch (Throwable t) {
-            log("HomePagePurifier install error: " + t);
+        if (ENABLE_HOME_PAGE_PURIFIER) {
+            try {
+                HomePagePurifier.install(xposed, classLoader);
+                log("HomePagePurifier installed.");
+            } catch (Throwable t) {
+                log("HomePagePurifier error: " + Log.getStackTraceString(t));
+            }
         }
 
-        try {
-            OrderPagePurifier.install(xposed, classLoader);
-            log("OrderPagePurifier installed successfully.");
-        } catch (Throwable t) {
-            log("OrderPagePurifier install error: " + t);
+        if (ENABLE_ORDER_PAGE_PURIFIER) {
+            try {
+                OrderPagePurifier.install(xposed, classLoader);
+                log("OrderPagePurifier installed.");
+            } catch (Throwable t) {
+                log("OrderPagePurifier error: " + Log.getStackTraceString(t));
+            }
         }
 
-        try {
-            DetailPagePurifier.install(xposed, classLoader);
-            log("DetailPagePurifier installed successfully.");
-        } catch (Throwable t) {
-            log("DetailPagePurifier install error: " + t);
+        if (ENABLE_DETAIL_PAGE_PURIFIER) {
+            try {
+                DetailPagePurifier.install(xposed, classLoader);
+                log("DetailPagePurifier installed.");
+            } catch (Throwable t) {
+                log("DetailPagePurifier error: " + Log.getStackTraceString(t));
+            }
         }
 
-        try {
-            UserPagePurifier.install(xposed, classLoader);
-            log("UserPagePurifier installed successfully.");
-        } catch (Throwable t) {
-            log("UserPagePurifier install error: " + t);
+        if (ENABLE_USER_PAGE_PURIFIER) {
+            try {
+                UserPagePurifier.install(xposed, classLoader);
+                log("UserPagePurifier installed.");
+            } catch (Throwable t) {
+                log("UserPagePurifier error: " + Log.getStackTraceString(t));
+            }
         }
 
-        try {
-            NetworkAdInterceptor.install(xposed, classLoader);
-            log("NetworkAdInterceptor installed successfully.");
-        } catch (Throwable t) {
-            log("NetworkAdInterceptor install error: " + t);
+        if (ENABLE_NETWORK_INTERCEPTOR) {
+            try {
+                NetworkAdInterceptor.install(xposed, classLoader);
+                log("NetworkAdInterceptor installed.");
+            } catch (Throwable t) {
+                log("NetworkAdInterceptor error: " + Log.getStackTraceString(t));
+            }
         }
 
-
-        try {
-            FlutterPageGuard.install(xposed, classLoader);
-            log("FlutterPageGuard installed successfully.");
-        } catch (Throwable t) {
-            log("FlutterPageGuard install error: " + t);
+        if (ENABLE_FLUTTER_GUARD) {
+            try {
+                FlutterPageGuard.install(xposed, classLoader);
+                log("FlutterPageGuard installed.");
+            } catch (Throwable t) {
+                log("FlutterPageGuard error: " + Log.getStackTraceString(t));
+            }
         }
 
-        log("All XiaoCanPurify hooks successfully initialized!");
+        log("XiaoCanPurify initialization finished!");
     }
 
     public static void log(String message) {
